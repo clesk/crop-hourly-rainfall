@@ -1,0 +1,711 @@
+---
+title: "final rain crops"
+author: "Corey Lesk"
+date: "`r Sys.Date()`"
+output:
+  rmdformats::html_docco:
+    highlight: kate
+    toc: true
+    toc_depth: 3
+---
+```{r knitr_init, echo=FALSE, cache=FALSE}
+# DO NOT edit this block
+knitr::opts_chunk$set(
+  cache=TRUE,
+  comment=NA,
+  message=FALSE,
+  warning=FALSE,
+  fig.width=12,
+  fig.height=7
+)
+```
+
+
+
+load useful packages using pacman:
+
+```{r}
+if(!require(pacman)) install.packages('pacman')
+pacman::p_load(
+  dplyr, # data manipulation
+  readr, # reading in data
+  ggplot2, # visualizing data
+  tidyr,
+  hexbin,
+  tibble,
+  lfe,
+  simpleboot,
+  gam,
+  corrplot,
+  Hmisc
+ 
+)
+
+```
+
+load fullreg data
+```{r}
+dat <- read_csv('C:\\Users\\HAL 9000\\Documents\\research\\pexag\\data\\county\\load\\15-yr_clean_full-num.csv') %>%
+  setNames(tolower(names(.)))
+na.omit(dat)
+dat$geoid <- factor(dat$geoid)
+```
+
+intensity-binned regression: maize
+```{r}
+#declare holder for bin coefficients
+dathrly1010 <- read_csv('pathto\\county-crop-hourly-rainfall-dataset.csv')
+dathrly1010 <- as.tibble(dathrly1010)
+dathrly1010 <- add_column(dathrly1010,pctarea = dathrly1010$harvested_acres / dathrly1010$county_acres)
+dathrly1010 <- add_column(dathrly1010,rhrs = dathrly1010$rtot / dathrly1010$rint)
+dathrly1010 <- add_column(dathrly1010,logy = log(dathrly1010$maize_yield))
+
+binstart <- which(colnames(dathrly1010) == "bin0.0_hrs")
+binend <- which(colnames(dathrly1010) == "bin150.0_hrs")
+nbins <- binend - binstart + 1
+#binnames <- colnames(dathrly1010)[binstar]
+coeffs <- matrix(nrow=nbins,ncol=14)
+
+#stratification
+#datsub <- dathrly1010 %>% filter(dathrly1010$centroid_lat < 40 & dathrly1010$centroid_lon > -93)#quantile(dathrly1010$centroid_lat,0.5)) 
+#datsub <- datsub %>% filter (datsub$centroid_lon<-93)
+
+#lonsplt <-quantile(dathrly1010$centroid_lon,0.5)
+#pctarea > quantile(dathrly1010$pctarea,0.8))
+
+datsub <- dathrly1010
+
+for(c in binstart:binend){ 
+  print(colnames(dathrly1010)[c])
+  
+  bindat <- data.frame(datsub$maize_yield, datsub$kdd, datsub[,c], datsub$geoid,datsub$Year, datsub$rtot, datsub$gdd, datsub$rhrs,datsub$srad, datsub$daily_maxdry, datsub$daily_rdays, datsub$rx5day,datsub$rx1day, datsub$`State ANSI`) 
+  
+  colnames(bindat) <- c('maize_yield','kdd','hrbin','geoid','year','rtot','gdd','rhrs','srad','maxdry','rdays','rx5day','rx1day','state')
+  
+  lmc <- felm(maize_yield ~ gdd + kdd + rtot + hrbin | geoid + year,data=bindat)
+  #coefficiens [ coeff, 1=estimate,2=se,4=p]
+  coeffs[c-binstart+1,1:3] = summary(lmc)$coefficients[1,c(1,2,4)] #gdd 
+  coeffs[c-binstart+1,4:6] = summary(lmc)$coefficients[2,c(1,2,4)] #kdd 
+  coeffs[c-binstart+1,7:9] = summary(lmc)$coefficients[3,c(1,2,4)] #rtot 
+  coeffs[c-binstart+1,10:12] = summary(lmc)$coefficients[4,c(1,2,4)] #hrbin 
+  #coeffs[c-binstart+1,13] = summary(lmc)$r2adj #full r2 adj.
+  coeffs[c-binstart+1,14] = sum(bindat['hrbin']>0)
+
+}
+
+#prepare plot dataframe:
+bins_all <- c(0.0,0.1,1.0,2.5,5.0,10.0,20,30,40,50,60,70,80,90,100,150)
+bins <- bins_all[1:nbins]
+
+binres <- data.frame(coeffs)
+binres <- add_column(binres, bins = bins)
+colnames(binres) <- c('gdd_coef','gdd_se','gdd_pval',
+'kdd_coef','kdd_se','kdd_pval', 
+'gdd_coef','gdd_se','gdd_pval',
+'bin_coef','bin_SE','bin_pval','r2adj','n','bin')
+
+p1<-ggplot(data=binres,aes(x=bins))+
+  geom_pointrange(aes(x=bins,y=bin_coef,ymin=(bin_coef-2*bin_SE),ymax=(bin_coef+2*bin_SE)),col=ifelse(binres$bin_pval < 0.05,'blue4','cyan'))+
+  ylab('delta yield (bu/ac) +- 2SE')+
+  xlab('')+
+  theme_minimal()+
+  scale_x_continuous(breaks=round(bins))+
+  geom_hline(yintercept = 0)+
+  #ggtitle('West of 94th meridian')+
+  theme(plot.title = element_text(hjust = 0.5))
+
+p1
+  
+```
+
+intensity binned regression: soy 
+```{r}
+#declare holder for bin coefficients
+dathrly1010 <- read_csv('pathto\\county-crop-hourly-rainfall-dataset.csv')
+#dathrly1010 <- as.tibble(dathrly1010)
+dathrly1010 <- add_column(dathrly1010,pctarea = dathrly1010$harvested_acres / dathrly1010$county_acres)
+dathrly1010 <- add_column(dathrly1010,rhrs = dathrly1010$rtot / dathrly1010$rint)
+dathrly1010 <- add_column(dathrly1010,logy = log(dathrly1010$maize_yield))
+
+binstart <- which(colnames(dathrly1010) == "bin0.0_hrs")
+binend <- which(colnames(dathrly1010) == "bin150.0_hrs")
+nbins <- binend - binstart + 1
+#binnames <- colnames(dathrly1010)[binstar]
+coeffs <- matrix(nrow=nbins,ncol=14)
+
+#stratification...
+#datsub <- datsub %>% filter (datsub$centroid_lon<-93)
+
+#or full sample...
+datsub <- dathrly1010
+
+
+#lonsplt <-quantile(dathrly1010$centroid_lon,0.5)
+#pctarea > quantile(dathrly1010$pctarea,0.8))
+
+
+for(c in binstart:binend){ 
+  print(colnames(dathrly1010)[c])
+  
+  bindat <- data.frame(datsub$soy_yield, datsub$kdd, datsub[,c], datsub$geoid,datsub$Year, datsub$rtot, datsub$gdd, datsub$rhrs,datsub$srad, datsub$daily_maxdry, datsub$daily_rdays, datsub$rx5day,datsub$rx1day, datsub$`State ANSI`) 
+  
+  colnames(bindat) <- c('soy_yield','kdd','hrbin','geoid','year','rtot','gdd','rhrs','srad','maxdry','rdays','rx5day','rx1day','state')
+ 
+  lmc <- felm(soy_yield ~ gdd + kdd + rtot + hrbin + srad| geoid + year,data=bindat)
+  #coefficiens [ coeff, 1=estimate,2=se,4=p]
+  coeffs[c-binstart+1,1:3] = summary(lmc)$coefficients[1,c(1,2,4)] #gdd 
+  coeffs[c-binstart+1,4:6] = summary(lmc)$coefficients[2,c(1,2,4)] #kdd 
+  coeffs[c-binstart+1,7:9] = summary(lmc)$coefficients[3,c(1,2,4)] #rtot 
+  coeffs[c-binstart+1,10:12] = summary(lmc)$coefficients[4,c(1,2,4)] #hrbin 
+  #coeffs[c-binstart+1,13] = summary(lmc)$r2adj #full r2 adj.
+  coeffs[c-binstart+1,14] = sum(bindat['hrbin']>0)
+
+}
+
+#prepare plot dataframe:
+bins_all <- c(0.0,0.1,1.0,2.5,5.0,10.0,20,30,40,50,60,70,80,90,100,150)
+bins <- bins_all[1:nbins]
+
+binres <- data.frame(coeffs)
+binres <- add_column(binres, bins = bins)
+colnames(binres) <- c('gdd_coef','gdd_se','gdd_pval',
+'kdd_coef','kdd_se','kdd_pval', 
+'gdd_coef','gdd_se','gdd_pval',
+'bin_coef','bin_SE','bin_pval','r2adj','n','bin')
+
+p1<-ggplot(data=binres,aes(x=bins))+
+  geom_pointrange(aes(x=bins,y=bin_coef,ymin=(bin_coef-2*bin_SE),ymax=(bin_coef+2*bin_SE)),col=ifelse(binres$bin_pval < 0.05,'blue4','cyan'))+
+  ylab('delta yield (bu/ac) +- 2SE')+
+  xlab('')+
+  theme_minimal()+
+  scale_x_continuous(breaks=round(bins))+
+  geom_hline(yintercept = 0)+
+  #ggtitle('West of 94th meridian')+
+  theme(plot.title = element_text(hjust = 0.5))
+
+p1
+```
+
+examine correlation between bins:
+
+```{r}
+binstart <- which(colnames(dathrly1010) == "bin0.0_hrs")
+binend <- which(colnames(dathrly1010) == "bin150.0_hrs")
+
+bindat = data.frame(dathrly1010[,binstart:binend])
+colnames(bindat) <- c(0.0,0.1,1.0,2.5,5.0,10.0,20,30,40,50,60,70,80,90,100,150)
+
+corbin <- rcorr(as.matrix(bindat))
+c1<-corrplot(corbin$r^2,type="upper",method="color", cl.lim = c(0, 1))
+c2<-corrplot(corbin$r, type="upper",method="color",  
+         p.mat = corbin$P, sig.level = 0.05, insig = "blank")
+
+#plot(dathrly1010$bin60.0_hrs,dathrly1010$bin70.0_hrs)
+#lmbin <- lm(bin100.0_hrs ~ bin150.0_hrs, data = dathrly1010)
+#summary(lmbin)
+
+require('gridExtra')
+g<-arrangeGrob(corrplot(corbin$r^2,type="upper"),corrplot(corbin$r, type="upper",  
+         p.mat = corbin$P, sig.level = 0.05, insig = "blank"),nrow=1,ncol=2)
+
+g
+```
+
+post-hoc rebin ftests
+
+maize post-hoc rebin hourly
+```{r}
+#declare holder for bin coefficients
+dathrly1010 <- read_csv('pathto\\county-crop-hourly-rainfall-dataset.csv')
+#dathrly1010 <- as.tibble(dathrly1010)
+dathrly1010 <- add_column(dathrly1010,rhrs = dathrly1010$rtot / dathrly1010$rint)
+
+dathrly1010$Year <- factor(dathrly1010$Year)
+dathrly1010$geoid <- factor(dathrly1010$geoid)
+dathrly1010$soy_yield <- as.numeric(dathrly1010$soy_yield)
+drizzle = dathrly1010$bin0.1_hrs + dathrly1010$bin1.0_hrs
+moderate = dathrly1010$bin5.0_hrs + dathrly1010$bin10.0_hrs + dathrly1010$bin20.0_hrs
+heavy = dathrly1010$bin100.0_hrs + dathrly1010$bin80.0_hrs + dathrly1010$bin90.0_hrs 
+
+datsub <- dathrly1010
+
+bindat <- data.frame(datsub$maize_yield, datsub$kdd, datsub$geoid,datsub$Year, datsub$rtot, datsub$gdd, drizzle, moderate, heavy, datsub$rhrs,datsub$srad, datsub$daily_maxdry, datsub$daily_rdays, datsub$rx5day,datsub$rx1day,datsub$rx1hr, datsub$`State ANSI`) 
+
+colnames(bindat) <- c('maize_yield','kdd','geoid','year','rtot','gdd','drizzle','moderate','heavy','rhrs','srad','maxdry','rdays','rx5day','rx1day','rx1hr','state')
+bindat<-na.omit(bindat)
+
+m0 <- lm(maize_yield ~ factor(geoid) + factor(year),data=bindat)
+m1 <- lm(maize_yield ~ gdd + kdd + factor(geoid) + factor(year),data=bindat)
+m2 <- lm(maize_yield ~ gdd + kdd + rtot + factor(geoid) + factor(year),data=bindat)
+m3 <- lm(maize_yield ~ gdd + kdd + rtot + moderate + heavy + drizzle + factor(geoid) + factor(year),data=bindat)
+m4 <- lm(maize_yield ~ gdd + kdd + rtot + bin0.0_hrs + bin0.1_hrs + bin1.0_hrs + bin2.5_hrs + bin5.0_hrs + bin10.0_hrs + bin20.0_hrs + bin30.0_hrs + bin40.0_hrs +bin50.0_hrs +bin60.0_hrs +bin70.0_hrs +bin80.0_hrs +bin90.0_hrs +bin100.0_hrs + bin150.0_hrs + factor(geoid) + factor(Year),data=datsub)
+
+anova(m0,m1,m2,m3,m4)
+
+m5 <- felm(maize_yield ~ gdd + kdd + rtot + moderate + heavy + drizzle | geoid + year,data=bindat)
+
+```
+
+soy post hoc rebin hourly
+ 
+```{r}
+#declare holder for bin coefficients
+dathrly1010 <- read_csv('pathto\\county-crop-hourly-rainfall-dataset.csv')
+#dathrly1010 <- as.tibble(dathrly1010)
+dathrly1010 <- add_column(dathrly1010,rhrs = dathrly1010$rtot / dathrly1010$rint)
+
+dathrly1010$Year <- factor(dathrly1010$Year)
+dathrly1010$geoid <- factor(dathrly1010$geoid)
+dathrly1010$soy_yield <- as.numeric(dathrly1010$soy_yield)
+
+drizzle = dathrly1010$bin0.1_hrs + dathrly1010$bin1.0_hrs
+moderate <- dathrly1010$bin10.0_hrs + dathrly1010$bin20.0_hrs
+heavy <- dathrly1010$bin40.0_hrs + dathrly1010$bin50.0_hrs + dathrly1010$bin60.0_hrs
+
+datsub <- dathrly1010
+
+bindat <- data.frame(datsub$soy_yield, datsub$kdd, datsub$geoid,datsub$Year, datsub$rtot, datsub$gdd, drizzle, moderate, heavy, datsub$rhrs,datsub$srad, datsub$daily_maxdry, datsub$daily_rdays, datsub$rx5day,datsub$rx1day, datsub$`State ANSI`) 
+
+colnames(bindat) <- c('soy_yield','kdd','geoid','year','rtot','gdd','drizzle','moderate','heavy','rhrs','srad','maxdry','rdays','rx5day','rx1day','state')
+
+bindat<-na.omit(bindat)
+
+m0 <- lm(soy_yield ~ factor(geoid) + factor(year),data=bindat)
+m1 <- lm(soy_yield ~ gdd + kdd + factor(geoid) + factor(year),data=bindat)
+m2 <- lm(soy_yield ~ gdd + kdd + rtot + factor(geoid) + factor(year),data=bindat)
+m3 <- lm(soy_yield ~ gdd + kdd + rtot + moderate + heavy + drizzle + factor(geoid) + factor(year),data=bindat)
+m4 <- lm(soy_yield ~ gdd + kdd + rtot + bin0.0_hrs + bin0.1_hrs + bin1.0_hrs + bin2.5_hrs + bin5.0_hrs + bin10.0_hrs + bin20.0_hrs + bin30.0_hrs + bin40.0_hrs +bin50.0_hrs +bin60.0_hrs +bin70.0_hrs +bin80.0_hrs +bin90.0_hrs +bin100.0_hrs + bin150.0_hrs + factor(geoid) + factor(Year),data=datsub)
+
+anova(m0,m1,m2,m3,m4)
+
+m5 <- felm(soy_yield ~ gdd + kdd + rtot + moderate + heavy + drizzle | geoid + year,data=bindat)
+
+summary(m5)
+```
+
+maize full model 
+
+```{r}
+m0 <- lm(maize_yield ~ factor(geoid) + factor(year),data=bindat)
+m1 <- lm(maize_yield ~ gdd + kdd + factor(geoid) + factor(year),data=bindat)
+m2 <- lm(maize_yield ~ gdd + kdd + rtot + factor(geoid) + factor(year),data=bindat)
+m3 <- lm(maize_yield ~ gdd + kdd + rtot + rx1hr + rx1day + rhrs + rdays + maxdry + rx5day + factor(geoid) + factor(year),data=bindat)
+
+anova(m0,m1,m2,m3)
+```
+
+soy full model 
+
+```{r}
+datsub <- dathrly1010
+
+bindat <- data.frame(datsub$soy_yield, datsub$kdd, datsub$geoid,datsub$Year, datsub$rtot, datsub$gdd, drizzle, moderate, heavy, datsub$rhrs,datsub$srad, datsub$daily_maxdry, datsub$daily_rdays, datsub$rx5day,datsub$rx1day, datsub$rx1hr, datsub$`State ANSI`) 
+
+colnames(bindat) <- c('soy_yield','kdd','geoid','year','rtot','gdd','drizzle','moderate','heavy','rhrs','srad','maxdry','rdays','rx5day','rx1day','rx1hr','state')
+
+bindat<-na.omit(bindat)
+
+m0 <- lm(soy_yield ~ factor(geoid) + factor(year),data=bindat)
+m1 <- lm(soy_yield ~ gdd + kdd + factor(geoid) + factor(year),data=bindat)
+m2 <- lm(soy_yield ~ gdd + kdd + rtot + factor(geoid) + factor(year),data=bindat)
+m3 <- lm(soy_yield ~ gdd + kdd + rtot + rx1hr + rx1day + rhrs + rdays + maxdry + rx5day + factor(geoid) + factor(year),data=bindat)
+
+
+anova(m0,m1,m2,m3)
+```
+
+find extremes count per year
+```{r}
+
+counts <- matrix(nrow=2017-2002+1,ncol=1)
+counts[] = 0
+
+binstart = which(colnames(dathrly1010) == "bin40.0_hrs")
+binend = which(colnames(dathrly1010) == "bin150.0_hrs")
+
+for(y in 2002:2017){ 
+
+  datsub <- dathrly1010 %>% filter(dathrly1010$Year == y)
+  
+  for(c in binstart:binend){ 
+   
+    counts[y-2001] = counts[y-2001] + sum(datsub[,c]>0)
+  
+  }
+}
+```
+
+find extremes count per year regional
+```{r}
+dathrly1010 <- read_csv('pathto\\county-crop-hourly-rainfall-dataset.csv')
+dathrly1010 <- as.tibble(dathrly1010)
+
+dathrly1010 <- dathrly1010 %>% filter (dathrly1010$centroid_lon > -93 & dathrly1010$centroid_lat < 40)
+
+counts <- matrix(nrow=2017-2002+1,ncol=1)
+counts[] = 0
+
+binstart = which(colnames(dathrly1010) == "bin40.0_hrs")
+binend = which(colnames(dathrly1010) == "bin150.0_hrs")
+
+for(y in 2002:2017){ 
+
+  datsub <- dathrly1010 %>% filter(dathrly1010$Year == y)
+  
+  for(c in binstart:binend){ 
+   
+    counts[y-2001] = counts[y-2001] + sum(datsub[,c]>0)
+  
+  }
+}
+```
+
+Irrigation intensity binned regression maize:
+
+```{r}
+#declare holder for bin coefficients
+dathrly1010 <- read_csv('pathto\\county-crop-hourly-rainfall-dataset.csv')
+dathrly1010 <- as.tibble(dathrly1010)
+dathrly1010 <- add_column(dathrly1010,pctarea = dathrly1010$harvested_acres / dathrly1010$county_acres)
+dathrly1010 <- add_column(dathrly1010,rhrs = dathrly1010$rtot / dathrly1010$rint)
+dathrly1010 <- add_column(dathrly1010,logy = log(dathrly1010$maize_yield))
+
+binstart <- which(colnames(dathrly1010) == "bin0.0_hrs")
+binend <- which(colnames(dathrly1010) == "bin150.0_hrs")
+nbins <- binend - binstart + 1
+#binnames <- colnames(dathrly1010)[binstar]
+coeffs <- matrix(nrow=nbins,ncol=14)
+
+#stratification
+irrigAreaFracSplt <- 0.05
+
+#datsub <- dathrly1010
+datsub <- dathrly1010 %>% filter (dathrly1010$mean_irrig_area_fraction>irrigAreaFracSplt)
+
+for(c in binstart:binend){ 
+  print(colnames(dathrly1010)[c])
+  
+  bindat <- data.frame(datsub$maize_yield, datsub$kdd, datsub[,c], datsub$geoid,datsub$Year, datsub$rtot, datsub$gdd, datsub$rhrs,datsub$srad, datsub$daily_maxdry, datsub$daily_rdays, datsub$rx5day,datsub$rx1day, datsub$`State ANSI`) 
+  
+  colnames(bindat) <- c('maize_yield','kdd','hrbin','geoid','year','rtot','gdd','rhrs','srad','maxdry','rdays','rx5day','rx1day','state')
+  
+  lmc <- felm(maize_yield ~ gdd + kdd + rtot + hrbin | geoid + year,data=bindat)
+  #coefficiens [ coeff, 1=estimate,2=se,4=p]
+  coeffs[c-binstart+1,1:3] = summary(lmc)$coefficients[1,c(1,2,4)] #gdd 
+  coeffs[c-binstart+1,4:6] = summary(lmc)$coefficients[2,c(1,2,4)] #kdd 
+  coeffs[c-binstart+1,7:9] = summary(lmc)$coefficients[3,c(1,2,4)] #rtot 
+  coeffs[c-binstart+1,10:12] = summary(lmc)$coefficients[4,c(1,2,4)] #hrbin 
+  #coeffs[c-binstart+1,13] = summary(lmc)$r2adj #full r2 adj.
+  coeffs[c-binstart+1,14] = sum(bindat['hrbin']>0)
+
+}
+
+#prepare plot dataframe:
+bins_all <- c(0.0,0.1,1.0,2.5,5.0,10.0,20,30,40,50,60,70,80,90,100,150)
+bins <- bins_all[1:nbins]
+
+binres <- data.frame(coeffs)
+binres <- add_column(binres, bins = bins)
+colnames(binres) <- c('gdd_coef','gdd_se','gdd_pval',
+'kdd_coef','kdd_se','kdd_pval', 
+'gdd_coef','gdd_se','gdd_pval',
+'bin_coef','bin_SE','bin_pval','r2adj','n','bin')
+
+p1<-ggplot(data=binres,aes(x=bins))+
+  geom_pointrange(aes(x=bins,y=bin_coef,ymin=(bin_coef-2*bin_SE),ymax=(bin_coef+2*bin_SE)),col=ifelse(binres$bin_pval < 0.05,'blue4','cyan'))+
+  ylab('delta yield (bu/ac) +- 2SE')+
+  xlab('')+
+  theme_minimal()+
+  scale_x_continuous(breaks=round(bins))+
+  geom_hline(yintercept = 0)+
+  #ggtitle('West of 94th meridian')+
+  theme(plot.title = element_text(hjust = 0.5))
+
+p1
+  
+```
+
+
+irrigation intensity binned regression: soy 
+```{r}
+#declare holder for bin coefficients
+dathrly1010 <- read_csv('pathto\\county-crop-hourly-rainfall-dataset.csv')
+dathrly1010 <- as.tibble(dathrly1010)
+dathrly1010 <- add_column(dathrly1010,pctarea = dathrly1010$harvested_acres / dathrly1010$county_acres)
+dathrly1010 <- add_column(dathrly1010,rhrs = dathrly1010$rtot / dathrly1010$rint)
+dathrly1010 <- add_column(dathrly1010,logy = log(dathrly1010$maize_yield))
+
+binstart <- which(colnames(dathrly1010) == "bin0.0_hrs")
+binend <- which(colnames(dathrly1010) == "bin150.0_hrs")
+nbins <- binend - binstart + 1
+#binnames <- colnames(dathrly1010)[binstar]
+coeffs <- matrix(nrow=nbins,ncol=14)
+
+#stratification
+irrigAreaFracSplt <- 0.05
+
+#datsub <- dathrly1010
+datsub <- dathrly1010 %>% filter (dathrly1010$mean_irrig_area_fraction_soy<irrigAreaFracSplt)
+
+for(c in binstart:binend){ 
+  print(colnames(dathrly1010)[c])
+  
+  bindat <- data.frame(datsub$soy_yield, datsub$kdd, datsub[,c], datsub$geoid,datsub$Year, datsub$rtot, datsub$gdd, datsub$rhrs,datsub$srad, datsub$daily_maxdry, datsub$daily_rdays, datsub$rx5day,datsub$rx1day, datsub$rtot^2) 
+  
+  colnames(bindat) <- c('soy_yield','kdd','hrbin','geoid','year','rtot','gdd','rhrs','srad','maxdry','rdays','rx5day','rx1day','rtot2')
+ 
+  lmc <- felm(soy_yield ~ gdd + kdd + rtot + hrbin + rtot2 | geoid + year,data=bindat)
+  #coefficiens [ coeff, 1=estimate,2=se,4=p]
+  coeffs[c-binstart+1,1:3] = summary(lmc)$coefficients[1,c(1,2,4)] #gdd 
+  coeffs[c-binstart+1,4:6] = summary(lmc)$coefficients[2,c(1,2,4)] #kdd 
+  coeffs[c-binstart+1,7:9] = summary(lmc)$coefficients[3,c(1,2,4)] #rtot 
+  coeffs[c-binstart+1,10:12] = summary(lmc)$coefficients[4,c(1,2,4)] #hrbin 
+  #coeffs[c-binstart+1,13] = summary(lmc)$r2adj #full r2 adj.
+  coeffs[c-binstart+1,14] = sum(bindat['hrbin']>0)
+
+}
+
+#prepare plot dataframe:
+bins_all <- c(0.0,0.1,1.0,2.5,5.0,10.0,20,30,40,50,60,70,80,90,100,150)
+bins <- bins_all[1:nbins]
+
+binres <- data.frame(coeffs)
+binres <- add_column(binres, bins = bins)
+colnames(binres) <- c('gdd_coef','gdd_se','gdd_pval',
+'kdd_coef','kdd_se','kdd_pval', 
+'gdd_coef','gdd_se','gdd_pval',
+'bin_coef','bin_SE','bin_pval','r2adj','n','bin')
+
+p1<-ggplot(data=binres,aes(x=bins))+
+  geom_pointrange(aes(x=bins,y=bin_coef,ymin=(bin_coef-2*bin_SE),ymax=(bin_coef+2*bin_SE)),col=ifelse(binres$bin_pval < 0.05,'blue4','cyan'))+
+  ylab('delta yield (bu/ac) +- 2SE')+
+  xlab('')+
+  theme_minimal()+
+  scale_x_continuous(breaks=round(bins))+
+  geom_hline(yintercept = 0)+
+  #ggtitle('West of 94th meridian')+
+  theme(plot.title = element_text(hjust = 0.5))
+
+p1
+```
+
+intensity binned regression w/ squared total precip term: soy 
+```{r}
+#declare holder for bin coefficients
+dathrly1010 <- read_csv('pathto\\county-crop-hourly-rainfall-dataset.csv')
+dathrly1010 <- as.tibble(dathrly1010)
+dathrly1010 <- add_column(dathrly1010,pctarea = dathrly1010$harvested_acres / dathrly1010$county_acres)
+dathrly1010 <- add_column(dathrly1010,rhrs = dathrly1010$rtot / dathrly1010$rint)
+dathrly1010 <- add_column(dathrly1010,logy = log(dathrly1010$maize_yield))
+
+binstart <- which(colnames(dathrly1010) == "bin0.0_hrs")
+binend <- which(colnames(dathrly1010) == "bin150.0_hrs")
+nbins <- binend - binstart + 1
+#binnames <- colnames(dathrly1010)[binstar]
+coeffs <- matrix(nrow=nbins,ncol=17)
+
+datsub <- dathrly1010
+datsub <- datsub %>% filter (datsub$centroid_lon > -93  & datsub$centroid_lat >= 40)
+
+for(c in binstart:binend){ 
+  print(colnames(dathrly1010)[c])
+  
+  bindat <- data.frame(datsub$soy_yield, datsub$kdd, datsub[,c], datsub$geoid,datsub$Year, datsub$rtot, datsub$gdd, datsub$rhrs,datsub$srad, datsub$rtot^2, datsub$daily_rdays, datsub$rx5day,datsub$rx1day, datsub$`State ANSI`) 
+  
+  colnames(bindat) <- c('soy_yield','kdd','hrbin','geoid','year','rtot','gdd','rhrs','srad','rtot2','rdays','rx5day','rx1day','state')
+ 
+  lmc <- felm(soy_yield ~ gdd + kdd + rtot2 + rtot + hrbin | geoid + year,data=bindat)
+  #coefficiens [ coeff, 1=estimate,2=se,4=p]
+  coeffs[c-binstart+1,1:3] = summary(lmc)$coefficients[1,c(1,2,4)] #gdd 
+  coeffs[c-binstart+1,4:6] = summary(lmc)$coefficients[2,c(1,2,4)] #kdd 
+  coeffs[c-binstart+1,7:9] = summary(lmc)$coefficients[3,c(1,2,4)] #rtot2 
+  coeffs[c-binstart+1,10:12] = summary(lmc)$coefficients[4,c(1,2,4)] #rtot
+  coeffs[c-binstart+1,13:15] = summary(lmc)$coefficients[5,c(1,2,4)] #hrbin
+  #coeffs[c-binstart+1,16] = summary(lmc)$r2adj #full r2 adj.
+  coeffs[c-binstart+1,17] = sum(bindat['hrbin']>0)
+
+}
+
+#prepare plot dataframe:
+bins_all <- c(0.0,0.1,1.0,2.5,5.0,10.0,20,30,40,50,60,70,80,90,100,150)
+bins <- bins_all[1:nbins]
+
+binres <- data.frame(coeffs)
+binres <- add_column(binres, bins = bins)
+colnames(binres) <- c('gdd_coef','gdd_se','gdd_pval','kdd_coef','kdd_se','kdd_pval', 
+'rtot2_coef','rtot2_se','rtot2_pval','rtot_coef','rtot_se','rtot_pval',
+'bin_coef','bin_SE','bin_pval','r2adj','n','bin')
+
+p1<-ggplot(data=binres,aes(x=bins))+
+  geom_pointrange(aes(x=bins,y=bin_coef,ymin=(bin_coef-2*bin_SE),ymax=(bin_coef+2*bin_SE)),col=ifelse(binres$bin_pval < 0.1,'blue4','cyan'))+
+  ylab('delta yield (bu/ac) +- 2SE')+
+  xlab('')+
+  theme_minimal()+
+  scale_x_continuous(breaks=round(bins))+
+  geom_hline(yintercept = 0)+
+  #ggtitle('West of 94th meridian')+
+  theme(plot.title = element_text(hjust = 0.5))
+
+p1
+```
+
+
+full model w/ squared precip term: soy
+
+```{r}
+bindat <- data.frame(datsub$soy_yield, datsub$kdd, datsub$geoid,datsub$Year, datsub$rtot, datsub$rtot^2, datsub$gdd, drizzle, moderate, heavy, datsub$rhrs,datsub$rx1hr, datsub$daily_maxdry, datsub$daily_rdays, datsub$rx5day,datsub$rx1day, datsub$`State ANSI`) 
+
+colnames(bindat) <- c('soy_yield','kdd','geoid','year','rtot','rtot2','gdd','drizzle','moderate','heavy','rhrs','rx1hr','maxdry','rdays','rx5day','rx1day','state')
+
+m1 <- felm(soy_yield ~ gdd + kdd + rtot2 + rtot + rx1hr + rx1day +  maxdry + rx5day | year + geoid,data=bindat)
+
+summary(m1)
+```
+
+intensity binned regression w/ squared total precip term: maize 
+```{r}
+#declare holder for bin coefficients
+dathrly1010 <- read_csv('pathto\\county-crop-hourly-rainfall-dataset.csv')
+dathrly1010 <- as.tibble(dathrly1010)
+dathrly1010 <- add_column(dathrly1010,pctarea = dathrly1010$harvested_acres / dathrly1010$county_acres)
+dathrly1010 <- add_column(dathrly1010,rhrs = dathrly1010$rtot / dathrly1010$rint)
+dathrly1010 <- add_column(dathrly1010,logy = log(dathrly1010$maize_yield))
+
+binstart <- which(colnames(dathrly1010) == "bin0.0_hrs")
+binend <- which(colnames(dathrly1010) == "bin150.0_hrs")
+nbins <- binend - binstart + 1
+#binnames <- colnames(dathrly1010)[binstar]
+coeffs <- matrix(nrow=nbins,ncol=17)
+
+
+
+datsub <- dathrly1010
+#datsub <- datsub %>% filter (datsub$centroid_lon < -93)
+
+for(c in binstart:binend){ 
+  print(colnames(dathrly1010)[c])
+  
+  bindat <- data.frame(datsub$maize_yield, datsub$kdd, datsub[,c], datsub$geoid,datsub$Year, datsub$rtot, datsub$gdd, datsub$rhrs,datsub$srad, datsub$rtot^2, datsub$daily_rdays, datsub$rx5day,datsub$rx1day, datsub$`State ANSI`) 
+  
+  colnames(bindat) <- c('maize_yield','kdd','hrbin','geoid','year','rtot','gdd','rhrs','srad','rtot2','rdays','rx5day','rx1day','state')
+ 
+  lmc <- felm(maize_yield ~ gdd + kdd + rtot2 + rtot + hrbin + srad| geoid + year,data=bindat)
+  #coefficiens [ coeff, 1=estimate,2=se,4=p]
+  coeffs[c-binstart+1,1:3] = summary(lmc)$coefficients[1,c(1,2,4)] #gdd 
+  coeffs[c-binstart+1,4:6] = summary(lmc)$coefficients[2,c(1,2,4)] #kdd 
+  coeffs[c-binstart+1,7:9] = summary(lmc)$coefficients[3,c(1,2,4)] #rtot2 
+  coeffs[c-binstart+1,10:12] = summary(lmc)$coefficients[4,c(1,2,4)] #rtot
+  coeffs[c-binstart+1,13:15] = summary(lmc)$coefficients[5,c(1,2,4)] #hrbin
+  #coeffs[c-binstart+1,16] = summary(lmc)$r2adj #full r2 adj.
+  coeffs[c-binstart+1,17] = sum(bindat['hrbin']>0)
+
+}
+
+#prepare plot dataframe:
+bins_all <- c(0.0,0.1,1.0,2.5,5.0,10.0,20,30,40,50,60,70,80,90,100,150)
+bins <- bins_all[1:nbins]
+
+binres <- data.frame(coeffs)
+binres <- add_column(binres, bins = bins)
+colnames(binres) <- c('gdd_coef','gdd_se','gdd_pval','kdd_coef','kdd_se','kdd_pval', 
+'rtot2_coef','rtot2_se','rtot2_pval','rtot_coef','rtot_se','rtot_pval',
+'bin_coef','bin_SE','bin_pval','r2adj','n','bin')
+
+p1<-ggplot(data=binres,aes(x=bins))+
+  geom_pointrange(aes(x=bins,y=bin_coef,ymin=(bin_coef-2*bin_SE),ymax=(bin_coef+2*bin_SE)),col=ifelse(binres$bin_pval < 0.05,'blue4','cyan'))+
+  ylab('delta yield (bu/ac) +- 2SE')+
+  xlab('')+
+  theme_minimal()+
+  scale_x_continuous(breaks=round(bins))+
+  geom_hline(yintercept = 0)+
+  #ggtitle('West of 94th meridian')+
+  theme(plot.title = element_text(hjust = 0.5))
+
+p1
+```
+
+full model w/ squared precip term: maize
+
+```{r}
+bindat <- data.frame(datsub$maize_yield, datsub$kdd, datsub$geoid,datsub$Year, datsub$rtot, datsub$rtot^2, datsub$gdd, drizzle, moderate, heavy, datsub$rhrs,datsub$rx1hr, datsub$daily_maxdry, datsub$daily_rdays, datsub$rx5day,datsub$rx1day, datsub$`State ANSI`) 
+
+colnames(bindat) <- c('maize_yield','kdd','geoid','year','rtot','rtot2','gdd','drizzle','moderate','heavy','rhrs','rx1hr','maxdry','rdays','rx5day','rx1day','state')
+
+m1 <- felm(maize_yield ~ gdd + kdd + rtot + rtot2 + rx1hr + rx1day +  maxdry + rx5day | year + geoid,data=bindat)
+
+summary(m1)
+```
+soy post hoc rebin hourly with rtot2
+ 
+```{r}
+#declare holder for bin coefficients
+dathrly1010 <- read_csv('pathto\\county-crop-hourly-rainfall-dataset.csv')
+#dathrly1010 <- as.tibble(dathrly1010)
+dathrly1010 <- add_column(dathrly1010,rhrs = dathrly1010$rtot / dathrly1010$rint)
+
+dathrly1010$Year <- factor(dathrly1010$Year)
+dathrly1010$geoid <- factor(dathrly1010$geoid)
+dathrly1010$soy_yield <- as.numeric(dathrly1010$soy_yield)
+
+drizzle = dathrly1010$bin0.1_hrs + dathrly1010$bin1.0_hrs
+moderate <- dathrly1010$bin10.0_hrs + dathrly1010$bin20.0_hrs
+heavy <- dathrly1010$bin70.0_hrs + dathrly1010$bin50.0_hrs + dathrly1010$bin60.0_hrs
+
+datsub <- dathrly1010
+
+bindat <- data.frame(datsub$soy_yield, datsub$kdd, datsub$geoid,datsub$Year, datsub$rtot, datsub$gdd, drizzle, moderate, heavy, datsub$rhrs,datsub$srad, datsub$daily_maxdry, datsub$daily_rdays, datsub$rx5day,datsub$rx1day, datsub$rtot^2) 
+
+colnames(bindat) <- c('soy_yield','kdd','geoid','year','rtot','gdd','drizzle','moderate','heavy','rhrs','srad','maxdry','rdays','rx5day','rx1day','rtot2')
+
+bindat<-na.omit(bindat)
+# 
+# m0 <- lm(soy_yield ~ factor(geoid) + factor(year),data=bindat)
+# m1 <- lm(soy_yield ~ gdd + kdd + factor(geoid) + factor(year),data=bindat)
+# m2 <- lm(soy_yield ~ gdd + kdd + rtot + factor(geoid) + factor(year),data=bindat)
+# m3 <- lm(soy_yield ~ gdd + kdd + rtot2 + rtot + moderate + heavy + drizzle + factor(geoid) + factor(year),data=bindat)
+# m4 <- lm(soy_yield ~ gdd + kdd + rtot + bin0.0_hrs + bin0.1_hrs + bin1.0_hrs + bin2.5_hrs + bin5.0_hrs + bin10.0_hrs + bin20.0_hrs + bin30.0_hrs + bin40.0_hrs +bin50.0_hrs +bin60.0_hrs +bin70.0_hrs +bin80.0_hrs +bin90.0_hrs +bin100.0_hrs + bin150.0_hrs + factor(geoid) + factor(Year),data=datsub)
+# 
+# anova(m0,m1,m2,m3,m4)
+
+m5 <- felm(soy_yield ~ gdd + kdd + rtot2 + rtot + moderate + heavy + drizzle | geoid + year,data=bindat)
+
+summary(m5)
+```
+maize post-hoc rebin hourly
+```{r}
+#declare holder for bin coefficients
+dathrly1010 <- read_csv('pathto\\county-crop-hourly-rainfall-dataset.csv')
+#dathrly1010 <- as.tibble(dathrly1010)
+dathrly1010 <- add_column(dathrly1010,rhrs = dathrly1010$rtot / dathrly1010$rint)
+
+dathrly1010$Year <- factor(dathrly1010$Year)
+dathrly1010$geoid <- factor(dathrly1010$geoid)
+dathrly1010$soy_yield <- as.numeric(dathrly1010$soy_yield)
+drizzle = dathrly1010$bin0.1_hrs + dathrly1010$bin1.0_hrs
+moderate = dathrly1010$bin5.0_hrs + dathrly1010$bin10.0_hrs + dathrly1010$bin20.0_hrs
+heavy <- dathrly1010$bin80.0_hrs + dathrly1010$bin90.0_hrs 
+
+datsub <- dathrly1010
+
+bindat <- data.frame(datsub$maize_yield, datsub$kdd, datsub$geoid,datsub$Year, datsub$rtot, datsub$gdd, drizzle, moderate, heavy, datsub$rhrs,datsub$srad, datsub$daily_maxdry, datsub$daily_rdays, datsub$rx5day,datsub$rx1day,datsub$rx1hr, datsub$rtot^2) 
+
+colnames(bindat) <- c('maize_yield','kdd','geoid','year','rtot','gdd','drizzle','moderate','heavy','rhrs','srad','maxdry','rdays','rx5day','rx1day','rx1hr','rtot2')
+bindat<-na.omit(bindat)
+
+# m0 <- lm(maize_yield ~ factor(geoid) + factor(year),data=bindat)
+# m1 <- lm(maize_yield ~ gdd + kdd + factor(geoid) + factor(year),data=bindat)
+# m2 <- lm(maize_yield ~ gdd + kdd + rtot + factor(geoid) + factor(year),data=bindat)
+# m3 <- lm(maize_yield ~ gdd + kdd + rtot + moderate + heavy + drizzle + factor(geoid) + factor(year),data=bindat)
+# m4 <- lm(maize_yield ~ gdd + kdd + rtot + bin0.0_hrs + bin0.1_hrs + bin1.0_hrs + bin2.5_hrs + bin5.0_hrs + bin10.0_hrs + bin20.0_hrs + bin30.0_hrs + bin40.0_hrs +bin50.0_hrs +bin60.0_hrs +bin70.0_hrs +bin80.0_hrs +bin90.0_hrs +bin100.0_hrs + bin150.0_hrs + factor(geoid) + factor(Year),data=datsub)
+
+anova(m0,m1,m2,m3,m4)
+
+m5 <- felm(maize_yield ~ gdd + kdd + rtot + rtot2 +  drizzle + moderate + heavy | geoid + year,data=bindat)
+summary(m5)
+
+
+```
+
+
+
+
